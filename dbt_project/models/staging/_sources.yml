@@ -1,0 +1,49 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Raw data ingested from CoinGecko API via Python extraction scripts"
+    database: crypto
+    schema: raw
+    loaded_at_field: ingested_at
+    freshness:
+      warn_after: { count: 36, period: hour }
+      error_after: { count: 48, period: hour }
+
+    tables: 
+      - name: daily_prices
+        description: >
+          Daily OHLCV data for 15 major crypto assets.
+          Grain: one row per (coin_id, price_date).
+          Updated daily by the crypto_market_daily Airflow DAG.
+        columns:
+          - name: coin_id
+            description: "CoinGecko asset identifier (e.g. 'bitcoin')"
+          - name: price_date
+            description: "UTC date of price observation"
+          - name: price_usd
+            description: "Closing price in USD"
+          - name: market_cap_usd
+            description: "Market capitalization in USD (total supply × price on that day)"
+          - name: volume_usd
+            description: "24h trading volume in USD"
+          - name: ingested_at
+            description: "Timestamp when this row was loaded into the warehouse"
+
+      - name: exchange_volumes
+        description: >
+          Daily snapshot of 24h BTC trading volume for top 10 exchanges.
+          Grain: one row per (exchange_id, snapshot_date).
+        columns:
+          - name: exchange_id
+            description: "CoinGecko exchange identifier"
+          - name: exchange_name
+            description: "Human-readable exchange name (e.g. 'Binance', 'Kraken')"
+          - name: volume_btc_24h
+            description: "24h trading volume denominated in BTC"
+          - name: trust_score
+            description: "CoinGecko reliability score (1-10) based on liquidity, API uptime, and regulatory compliance"
+          - name: ingested_at
+            description: "Timestamp when this row was loaded into the warehouse"
+          - name: snapshot_date
+            description: "Date the volume snapshot was taken"

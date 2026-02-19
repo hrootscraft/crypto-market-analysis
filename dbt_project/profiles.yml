@@ -1,0 +1,26 @@
+# Database Connections
+crypto_market:
+  target: prod # default target to use when running dbt commands without --target
+  # 2 targets defined: prod for production warehouse, dev for local development
+  # so you never accidentally run dbt commands against production data
+  # run locally with --target dev, dbt writes to analytics_dev schema. 
+  # Airflow always uses --target prod
+  outputs:
+    prod:
+      type: postgres
+      host: warehouse # docker internal hostname for the warehouse service
+      port: 5432
+      user: crypto_user
+      pass: crypto_pass
+      dbname: crypto
+      schema: analytics # dbt creates tables and views in this schema
+      threads: 2 # number of threads dbt will use to run models in parallel; adjust based on your machine and database capabilities
+    dev:
+      type: postgres
+      host: localhost # local development
+      port: 5433
+      user: crypto_user
+      pass: crypto_pass
+      dbname: crypto
+      schema: analytics_dev # use a separate schema for development to avoid conflicts with production data
+      threads: 2 

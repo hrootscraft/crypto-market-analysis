@@ -1,0 +1,59 @@
+# Tests and Documentation
+version: 2
+
+models:
+  - name: int_rolling_volatility
+    description: >
+      Daily returns with 7-day and 30-day rolling volatility and
+      volume statistics. Used downstream for market regime classification
+      and volume anomaly detection.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [coin_id, price_date]
+    columns:
+      - name: coin_id
+        data_tests: [not_null]
+      - name: price_date
+        data_tests: [not_null]
+      - name: daily_return
+        description: "Simple daily return: (price_t - price_t-1) / price_t-1"
+        data_tests: [not_null]
+      - name: price_usd
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: volatility_7d
+        description: "7-day rolling standard deviation of daily returns"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: volatility_30d
+        description: "30-day rolling standard deviation of daily returns"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: int_volume_anomalies
+    description: >
+      Flags days where trading volume deviates >2 sigma from the 30-day
+      rolling mean. Used to identify confounders for experiments and
+      flag market events.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [coin_id, price_date]
+    columns:
+      - name: coin_id
+        data_tests: [not_null]
+      - name: price_date
+        data_tests: [not_null]
+      - name: volume_flag
+        description: "'high_anomaly', 'low_anomaly', or 'normal'"
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "high_anomaly"
+                - "low_anomaly"
+                - "normal"

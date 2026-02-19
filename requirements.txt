@@ -1,0 +1,15 @@
+# Extract & Load
+requests>=2.31,<3
+psycopg2-binary>=2.9,<3
+
+# Analysis / Notebooks
+pandas>=2.2,<3
+sqlalchemy>=2.0,<3
+plotly>=5.18,<6
+jupyter>=1.0
+
+# Testing
+pytest>=8.0,<9
+
+# dbt (optional - for local development outside Docker)
+# dbt-postgres>=1.8,<2

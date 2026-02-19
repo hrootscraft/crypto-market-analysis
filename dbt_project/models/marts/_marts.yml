@@ -1,0 +1,134 @@
+# Tests and Documentation
+version: 2
+
+models:
+  - name: mart_market_regime
+    description: >
+      Daily market regime classification per coin. Combines moving average
+      signals and volatility levels to label each day as bull/bear/sideways
+      and high/medium/low volatility. Use for contextualizing product metrics
+      and controlling for market conditions in experiments.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [coin_id, price_date]
+    columns:
+      - name: coin_id
+        data_tests: [not_null]
+      - name: price_date
+        data_tests: [not_null]
+      - name: price_usd
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: market_regime
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "bull"
+                - "bear"
+                - "sideways"
+      - name: volatility_regime
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "high_vol"
+                - "medium_vol"
+                - "low_vol"
+
+  - name: mart_exchange_market_share
+    description: >
+      Daily exchange market share based on 24h BTC trading volume.
+      Tracks competitive dynamics between major exchanges
+      (e.g. Binance, Kraken, OKX, and others).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [exchange_id, snapshot_date]
+    columns:
+      - name: exchange_id
+        data_tests: [not_null]
+      - name: snapshot_date
+        data_tests: [not_null]
+      - name: market_share_pct
+        description: "Exchange's share of total 24h BTC volume as percentage"
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_daily_summary
+    description: >
+      Dashboard-ready daily summary combining price, regime, anomaly,
+      and drawdown data for all tracked coins. Primary table for
+      Superset dashboards and leadership reporting.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [coin_id, price_date]
+    columns:
+      - name: coin_id
+        data_tests: [not_null]
+      - name: price_date
+        data_tests: [not_null]
+      - name: price_usd
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: volume_flag
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "high_anomaly"
+                - "low_anomaly"
+                - "normal"
+      - name: drawdown_pct
+        description: "Percentage drawdown from rolling peak price"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 0
+      - name: drawdown_severity
+        description: "Severity bucket for drawdown: critical (<-30%), moderate (-30% to -15%), mild (>-15%)"
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "critical"
+                - "moderate"
+                - "mild"
+
+  - name: mart_cross_asset_correlation
+    description: >
+      Rolling 30-day Pearson correlation between BTC and each altcoin.
+      Tracks diversification dynamics for institutional portfolio analysis.
+      High correlation (>0.8) means the market moves in lockstep.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [coin_id, price_date]
+    columns:
+      - name: coin_id
+        data_tests: [not_null]
+      - name: price_date
+        data_tests: [not_null]
+      - name: correlation_30d
+        description: "30-day rolling Pearson correlation with BTC returns"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: -1
+              max_value: 1
+      - name: correlation_regime
+        data_tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "high_correlation"
+                - "moderate_correlation"
+                - "low_correlation"
+                - "negative_correlation"
+

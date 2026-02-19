@@ -1,0 +1,27 @@
+# Main Configuration File for our dbt project 
+# This is where we define our project name, link to the profiles.yml for database 
+# connection details, specify where our models and tests are located, and set configurations 
+# for how dbt should materialize our models (e.g. as tables or views).
+name: "crypto_market"
+
+profile: "crypto_market" # links to profiles.yml for database connection details
+
+model-paths: ["models"] # where dbt looks for model SQL files
+test-paths: ["tests"] # where custom data tests are defined
+macro-paths: ["macros"] # use this for any custom SQL functions or macros you'd want to define for reuse across models
+
+target-path: "target" # where dbt will write compiled SQL and test results; this should be in .gitignore
+clean-targets: # directories to be deleted when running `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+# The staging models are materialized as views to ensure they always reflect the latest data,
+# while the mart models are materialized as tables for improved query performance in reporting & analysis.
+models: 
+  crypto_market:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table
