@@ -3,6 +3,8 @@
 End-to-end data pipeline that ingests daily crypto market data from CoinGecko,
 transforms it through a dbt analytics layer (volatility regimes, volume anomaly
 detection, exchange market share), and orchestrates everything with Apache Airflow.
+An MCP server lets AI assistants such as Claude query the tested marts in plain
+English, through a read-only database role.
 
 ## Architecture
 
@@ -14,9 +16,11 @@ flowchart LR
     D -->|Serve| E["Superset"]
     F["Airflow"] -.->|orchestrates<br>daily @ 06:00 UTC| B
     F -.->|orchestrates| D
+    D -->|read-only role| G["MCP server"]
+    G <-->|tools| H["Claude / AI assistant"]
 ```
 
-> All services containerized via Docker Compose.
+> All services containerized via Docker Compose. The MCP server runs on your machine and connects to the warehouse on port 5433.
 
 ## Key Design Decisions
 
@@ -165,8 +169,11 @@ ORDER BY snapshot_date DESC, volume_rank LIMIT 10;
 
 ```bash
 # Python unit tests
-pip install pytest requests psycopg2-binary
+pip install -r requirements.txt
 pytest tests/ -v
+
+# MCP server integration tests (needs the stack running and the marts built)
+MCP_INTEGRATION=1 pytest tests/test_mcp_server.py -v
 
 # dbt tests (runs inside the pipeline, or manually)
 docker exec -it airflow_scheduler bash -c \
@@ -269,6 +276,103 @@ graph LR
 ![Volume Anomalies](dashboards/screenshots/anomalies_in_range90.png)
 
 </details>
+
+## Ask Claude About the Market (MCP Server)
+
+[`mcp_server/`](mcp_server/) is a [Model Context Protocol](https://modelcontextprotocol.io) server
+that exposes the four dbt marts as tools an AI assistant can call. Instead of writing SQL or
+building a chart, you can ask Claude *"Which coins had unusual volume this week, and was the
+market bullish when it happened?"* and it answers from the same tested tables Superset uses,
+citing the date and table behind every number.
+
+### Tools
+
+| Tool                        | What it answers                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `list_datasets`             | Which tables exist, what each column means, row counts and date coverage                          |
+| `get_market_snapshot`       | One day across all coins: price, return, bull/bear/sideways, volatility, volume flag, drawdown     |
+| `get_coin_history`          | Daily series for one coin, optionally within a date range                                         |
+| `find_volume_anomalies`     | Days where volume was more than 2σ from its 30-day mean, largest first                            |
+| `get_exchange_market_share` | Venue share of 24h BTC volume, plus top-3 share and Herfindahl-Hirschman concentration index      |
+| `get_btc_correlation`       | 30-day correlation of each altcoin with BTC (how much diversification is left)                    |
+| `run_readonly_query`        | Custom SELECT over the marts when no tool fits (guarded, see below)                               |
+
+There is also a `market_briefing` prompt that has Claude draft a short, sourced market brief.
+
+Every tool is marked read-only and returns structured JSON with an `as_of` date and `source` table,
+so the assistant's answers stay grounded in the warehouse rather than its own memory.
+
+### Governance: three independent read-only layers
+
+A model writing its own SQL is the risky part, so `run_readonly_query` must get past three checks,
+any one of which would stop a write on its own:
+
+1. **SQL guard** ([`sql_guard.py`](mcp_server/sql_guard.py)): parses the query with sqlglot and accepts
+   only a single `SELECT` over the four mart tables. Writes (including `DELETE` hidden in a `WITH`),
+   DDL, `SELECT ... INTO`, row locks, `SET`, other schemas (`raw`, `pg_catalog`) and functions like
+   `pg_sleep` or `pg_read_file` are rejected with a message the model can learn from.
+2. **Read-only transaction** ([`db.py`](mcp_server/db.py)): each call runs in a `READ ONLY` transaction
+   with a 5-second statement timeout and a server-side cursor (Postgres only allows `SELECT` there),
+   then rolls back. Results are capped at 1,000 rows.
+3. **Least-privilege role** ([`sql/create_mcp_reader_role.sql`](sql/create_mcp_reader_role.sql)): the
+   server logs in as `mcp_reader`, which has `SELECT` on `analytics` only, no access to `raw`, and
+   defaults to read-only sessions. Default privileges keep it working after dbt rebuilds the tables.
+
+The tests cover each layer separately, including a test that bypasses the guard and confirms the
+database still refuses the write.
+
+### Setup
+
+```bash
+# 1. Start the stack and run the DAG once (see Quick Start) so the marts exist.
+
+# 2. Create the read-only role. A fresh `docker compose up` does this automatically;
+#    for a warehouse volume created before this change, run it once:
+docker compose exec -T warehouse psql -U crypto_user -d crypto < sql/create_mcp_reader_role.sql
+
+# 3. Install the server's dependencies (Python 3.10+)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 4. Check it works with the MCP Inspector (optional)
+npx @modelcontextprotocol/inspector .venv/bin/python -m mcp_server
+```
+
+**Claude Desktop:** Settings → Developer → Edit Config, then add (use your own absolute paths):
+
+```json
+{
+  "mcpServers": {
+    "crypto-market": {
+      "command": "/ABSOLUTE/PATH/crypto-market-analysis/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "PYTHONPATH": "/ABSOLUTE/PATH/crypto-market-analysis",
+        "MCP_PG_HOST": "localhost",
+        "MCP_PG_PORT": "5433"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```bash
+# run from the repo root
+claude mcp add --transport stdio --env PYTHONPATH=$PWD crypto-market -- $PWD/.venv/bin/python -m mcp_server
+```
+
+Connection settings come from `MCP_PG_HOST`, `MCP_PG_PORT`, `MCP_PG_DB`, `MCP_PG_USER`,
+`MCP_PG_PASSWORD` and `MCP_STATEMENT_TIMEOUT_MS` (defaults match the local Docker stack; see `.env.example`).
+
+### Example questions
+
+- "Give me today's market snapshot. How many coins are in a bear regime, and which are in critical drawdown?"
+- "Did Bitcoin have any volume anomalies in the last two weeks? What was its return on those days?"
+- "How concentrated is exchange volume? Would the HHI count as highly concentrated?"
+- "Which altcoins still offer diversification versus BTC?"
+- "Use the market_briefing prompt for the latest date."
 
 ## Analysis Notebook
 
@@ -380,6 +484,16 @@ crypto-market-pipeline/
 │       ├── assert_no_date_gaps.sql
 │       └── assert_no_negative_volumes.sql
 │
+├── mcp_server/                         # MCP server: lets AI assistants query the marts
+│   ├── __main__.py                     # `python -m mcp_server` (stdio)
+│   ├── server.py                       # Tool definitions
+│   ├── catalog.py                      # Business definitions of each mart and column
+│   ├── sql_guard.py                    # Rejects anything but SELECT over the marts
+│   └── db.py                           # Read-only transactions with timeouts
+│
+├── sql/
+│   └── create_mcp_reader_role.sql      # Least-privilege role for the MCP server
+│
 ├── superset/
 │   ├── superset_config.py              # Superset configuration
 │   ├── superset-init.sh                # Bootstrap: DB migrate + admin user + warehouse connection
@@ -389,7 +503,9 @@ crypto-market-pipeline/
 │   └── crypto_market_analysis.ipynb    # Plotly analytical deep-dive
 │
 ├── tests/
-│   └── test_extraction.py              # Python unit tests (pytest)
+│   ├── test_extraction.py              # Python unit tests (pytest)
+│   ├── test_mcp_sql_guard.py           # SQL guard unit tests
+│   └── test_mcp_server.py              # MCP tools against a live warehouse
 │
 └── dashboards/
     └── screenshots/                    # Dashboard screenshots for README
@@ -406,6 +522,7 @@ This is a portfolio project running locally. For a production deployment, I woul
 - **CI/CD**: GitHub Actions to run `dbt test` and `pytest` on every PR
 - **Data quality**: Add Great Expectations or dbt elementary for more comprehensive data validation
 - **Backfill**: Parameterize the DAG with execution_date for historical backfills
+- **MCP server**: Serve over Streamable HTTP behind OAuth, keep the `mcp_reader` password in a secrets manager, and log every tool call for audit
 
 ## Tech Stack
 
@@ -417,3 +534,5 @@ This is a portfolio project running locally. For a production deployment, I woul
 | dbt-postgres    | latest  | SQL transformations and testing   |
 | Apache Superset | latest  | Self-serve dashboards and SQL Lab |
 | Docker Compose  | 3.8     | Containerization                  |
+| MCP Python SDK  | 2.x     | AI assistant access to the marts  |
+| sqlglot         | 30.x    | SQL parsing for the read-only guard |

@@ -8,8 +8,13 @@ sqlalchemy>=2.0,<3
 plotly>=5.18,<6
 jupyter>=1.0
 
+# MCP server (lets AI assistants query the marts)
+mcp>=2.3,<3
+sqlglot>=30,<31
+
 # Testing
 pytest>=8.0,<9
+pyyaml>=6  # catalog-vs-dbt test
 
 # dbt (optional - for local development outside Docker)
 # dbt-postgres>=1.8,<2
