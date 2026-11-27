@@ -193,7 +193,7 @@ def get_exchange_market_share(
 ) -> dict[str, Any]:
     """Exchange share of 24h BTC trading volume on one snapshot date, with market
     concentration: top-3 combined share and the Herfindahl-Hirschman Index
-    (sum of squared % shares; above 2,500 is conventionally 'highly concentrated')."""
+    (sum of squared % shares, 0-10,000; the 2023 US Merger Guidelines treat above 1,800 as highly concentrated)."""
     day = _resolve_date("mart_exchange_market_share", snapshot_date)
     top = _query(
         """
