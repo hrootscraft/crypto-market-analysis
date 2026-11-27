@@ -38,7 +38,9 @@ services:
       - "5433:5432" # avoid conflict with local Postgres
     volumes:
       - warehouse_data:/var/lib/postgresql/data
-      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      # init scripts run in filename order on first start of a fresh volume
+      - ./init_db.sql:/docker-entrypoint-initdb.d/01_init_db.sql
+      - ./sql/create_mcp_reader_role.sql:/docker-entrypoint-initdb.d/02_mcp_reader.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crypto_user -d crypto"]
       interval: 5s
